@@ -57,11 +57,24 @@ def appid_to_name(appid, libraries):
                 return m.group(1)
     return f"AppID {appid}"
 
-RE_APP_UPDATE = re.compile(r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+App update changed\s*:\s*(?P<flags>.*)$')
-RE_STATE = re.compile(r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+state changed\s*:\s*(?P<flags>.*)$')
-RE_PROGRESS = re.compile(r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+update started\s*:\s*download\s+(?P<done>\d+)/(?P<total>\d+)')
-RE_RATE = re.compile(r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+Current download rate:\s+(?P<mbps>[0-9.]+)\s+Mbps')
-RE_CANCELED = re.compile(r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+update canceled\s*:\s*(?P<reason>.*)$')
+RE_APP_UPDATE = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+App update changed\s*:\s*(?P<flags>.*)$'
+)
+RE_STATE = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+state changed\s*:\s*(?P<flags>.*)$'
+)
+RE_PROGRESS = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+update started\s*:\s*download\s+(?P<done>\d+)/(?P<total>\d+)'
+)
+RE_RATE = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+Current download rate:\s+(?P<mbps>[0-9.]+)\s+Mbps'
+)
+RE_CANCELED = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+update canceled\s*:\s*(?P<reason>.*)$'
+)
+RE_FINISHED = re.compile(
+    r'^\[(?P<ts>[\d-]+\s+[\d:]+)\]\s+AppID\s+(?P<appid>\d+)\s+finished update\b'
+)
 
 def tail_lines(path, n=500, max_bytes=600_000):
     with open(path, "rb") as f:
@@ -73,7 +86,7 @@ def tail_lines(path, n=500, max_bytes=600_000):
     return lines[-n:]
 
 def pick_active_app(lines):
-    latest = None  # (idx, appid, flags)
+    latest = None
     for i, line in enumerate(lines):
         m = RE_APP_UPDATE.match(line)
         if not m:
@@ -82,6 +95,13 @@ def pick_active_app(lines):
         if ("Downloading" in flags) or ("Running Update" in flags):
             latest = (i, int(m.group("appid")), flags.strip())
     return latest[1] if latest else None
+
+def is_finished_for_app(appid, lines):
+    for line in lines:
+        m = RE_FINISHED.match(line)
+        if m and int(m.group("appid")) == appid:
+            return True
+    return False
 
 def summarize_for_app(appid, lines):
     flags_app_update = None
@@ -123,8 +143,12 @@ def summarize_for_app(appid, lines):
     else:
         status = "IDLE"
 
-    if rate_mbps is not None and rate_mbps == 0.0 and status in ("DOWNLOADING", "RUNNING_UPDATE"):
-        status = "PAUSED"
+    # Приоритет по скорости
+    if rate_mbps is not None:
+        if rate_mbps > 0:
+            status = "DOWNLOADING"
+        elif rate_mbps == 0.0 and status in ("DOWNLOADING", "RUNNING_UPDATE"):
+            status = "PAUSED"
 
     return {"done": done, "total": total, "rate_mbps": rate_mbps, "status": status}
 
@@ -144,13 +168,29 @@ def main():
 
     libraries = get_libraries(steam)
 
+    idle_streak = 0
+
+    done_mode = False
+    done_name = None
+
     for minute in range(1, 6):
-        lines = tail_lines(content_log, n=700)
-        appid = pick_active_app(lines)
         ts = datetime.now().strftime("%H:%M:%S")
 
+        # Если уже завершили — просто печатаем DONE до конца 5 минут
+        if done_mode:
+            print(f"[{ts}] {minute}/5  {done_name} | DONE | 0.00 MB/s (0.000 Mbps) | progress: finished")
+            time.sleep(60)
+            continue
+
+        lines = tail_lines(content_log, n=800)
+        appid = pick_active_app(lines)
+
         if not appid:
+            idle_streak += 1
             print(f"[{ts}] {minute}/5  No active Steam download/update detected")
+            if idle_streak >= 2:
+                done_mode = True
+                done_name = "Steam"
             time.sleep(60)
             continue
 
@@ -169,6 +209,21 @@ def main():
             prog = "progress: unknown"
 
         print(f"[{ts}] {minute}/5  {name} | {info['status']} | {speed} | {prog}")
+
+        # Если Steam сообщил, что обновление закончено — включаем DONE-режим (без выхода)
+        if is_finished_for_app(appid, lines):
+            done_mode = True
+            done_name = name
+
+        # IDLE 2 минуты подряд - DONE-режим
+        if info["status"] == "IDLE":
+            idle_streak += 1
+            if idle_streak >= 2:
+                done_mode = True
+                done_name = name
+        else:
+            idle_streak = 0
+
         time.sleep(60)
 
 if __name__ == "__main__":
