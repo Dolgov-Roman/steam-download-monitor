@@ -18,12 +18,6 @@
 - Установленный Steam
 - Python 3.9+ (подойдёт и новее)
 
-## Запуск
-1. Убедитесь, что в Steam идёт загрузка/обновление (иначе будет `No active Steam download/update detected`).
-2. Запустите:
-```bash
-python monitor.py
-
 ## Статусы
 
 - `DOWNLOADING` — скорость > 0 или в логе есть флаг загрузки
@@ -31,6 +25,12 @@ python monitor.py
 - `RUNNING_UPDATE` — идёт обновление (без активной загрузки)
 - `DONE` — Steam сообщил, что обновление/загрузка завершены (дальше до конца 5 минут выводится DONE)
 - `IDLE` — нет активности по выбранному AppID
+
+## Запуск
+1. Убедитесь, что в Steam идёт загрузка/обновление (иначе будет `No active Steam download/update detected`).
+2. Запустите:
+```bash
+python monitor.py
 
 ## Как работает
 - Путь Steam определяется через реестр Windows:
