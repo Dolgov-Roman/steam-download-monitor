@@ -24,3 +24,26 @@
 ```bash
 python monitor.py
 
+## Как работает
+- Путь Steam определяется через реестр Windows:
+  - HKCU\Software\Valve\Steam\SteamPath (основной)
+  - HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath (fallback)
+- Скрипт читает лог Steam `logs/content_log.txt` и извлекает:
+  - скорость: `Current download rate: ... Mbps`
+  - статус: `App update changed` / `state changed` (Downloading / Suspended и т.п.)
+  - прогресс: `update started : download A/B`
+- Название игры определяется по AppID через `steamapps/appmanifest_<appid>.acf`.
+
+## Запуск в фоне 
+### pythonw.exe (без окна консоли)
+```bat
+pythonw.exe monitor.py
+
+## Ограничения
+- Скрипт рассчитан на Windows + Steam.
+- Опирается на формат строк в `content_log.txt`. При изменении формата логов Steam может потребоваться обновление регулярных выражений.
+
+## Зависимости
+Внешних зависимостей нет (только стандартная библиотека Python).
+
+
